@@ -12,14 +12,23 @@ import json
 import re
 from dataclasses import dataclass
 
-# Thought: ... \n Action: <name> \n Action Input: {...}
+# Thought: ... \n Action: <name> \n Action Input: <anything>
 # DOTALL so Thought's content can span multiple lines; the Action/Action Input
 # lines are anchored so a stray "Action:"-looking word inside prose doesn't
-# false-match mid-Thought.
+# false-match mid-Thought. Action Input is captured up to the next
+# Thought:/Action:/Observation: marker (or end of string) rather than
+# requiring a `{...}` wrapper -- a genuinely brace-less Action Input (e.g.
+# `Action Input: city=Paris`) is real, malformed ToolBench-derived data, and
+# should still reach the lenient JSON-repair fallback below rather than
+# silently falling through to the parsed_from_text branch untried. An
+# earlier version of this regex required a leading `{`, which meant only
+# brace-wrapped-but-invalid JSON (e.g. `{city: Paris}`) ever reached the
+# fallback -- caught during agent_flan.py normalizer development.
 REACT_TURN_RE = re.compile(
     r"Thought:\s*(?P<thought>.*?)\s*\n"
     r"Action:\s*(?P<action>\S+)\s*\n"
-    r"Action Input:\s*(?P<action_input>\{.*\})",
+    r"Action Input:\s*(?P<action_input>.*?)"
+    r"(?=\n\s*(?:Thought:|Action:|Observation:)|\Z)",
     re.DOTALL,
 )
 

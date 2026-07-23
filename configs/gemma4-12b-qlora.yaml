@@ -1,0 +1,64 @@
+run_name: gemma4-12b-qlora-agent-v1
+seed: 42
+
+model:
+  base_model: google/gemma-4-12B-it      # any HF causal-LM chat model id, swappable
+  trust_remote_code: false
+  chat_template_path: null               # only set if swapped-in model lacks a tool-aware template
+  attn_implementation: sdpa
+
+quantization:
+  enabled: true                          # QLoRA toggle
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_compute_dtype: bfloat16
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  bias: none
+  task_type: CAUSAL_LM
+
+data:
+  manifest_path: data/manifest.jsonl
+  holdout_path: data/holdout.jsonl
+  sources: {agent_flan: 3.0, glaive: 1.0, hermes: 1.0, toolace: 1.0, xlam: 0.5}
+  max_examples_per_source: null          # set for smoke/dev runs
+  shuffle: true
+
+training:
+  output_dir: outputs/gemma4-12b-qlora-agent-v1
+  num_train_epochs: 2
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 16
+  learning_rate: 2.0e-4
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  max_length: 4096
+  packing: false
+  assistant_only_loss: true
+  gradient_checkpointing: true
+  bf16: true
+  logging_steps: 10
+  save_strategy: steps
+  save_steps: 200
+  save_total_limit: 3
+  eval_strategy: steps
+  eval_steps: 200
+  report_to: [wandb]                     # or []
+
+eval:
+  dev_holdout: {enabled: true}
+  bfcl:
+    enabled: false
+    handler_key: gemma-4-12b-it
+    test_categories: [multi_turn_base, multi_turn_miss_func, multi_turn_miss_param, multi_turn_long_context]
+    regression_categories: [simple, multiple, parallel]
+    backend: vllm
+  tau2_bench:
+    enabled: false
+    repo: https://github.com/sierra-research/tau2-bench
+    domains: null
