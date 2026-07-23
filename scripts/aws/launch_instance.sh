@@ -20,15 +20,18 @@
 #   AWS_INSTANCE_TYPE      default g5.12xlarge (4x A10G, 24GiB/~22-23GiB usable VRAM EACH -- data-parallel
 #                           DDP training, so every GPU independently holds the full quantized model + LoRA
 #                           adapters + its own batch's activations, same per-GPU footprint as a single A10G).
-#                           On-demand (us-east-1, verified 2026-07): $5.672/hr = $1.418/GPU-hr -- cheaper
-#                           per-GPU than every single-GPU option considered (g5.2xlarge ~$1.21/hr,
-#                           g6e.xlarge/1x L40S ~$1.861/hr), AND LoRA's small gradient-sync volume (~65M
-#                           trainable params, not the full 12B) gives good multi-GPU scaling efficiency --
-#                           net effect: roughly the same total training COST as staying single-GPU, but
-#                           ~3.2-3.6x faster wall-clock. Real tradeoff versus g6e.xlarge (1x L40S): more
-#                           VRAM headroom on the L40S (estimated peak ~15-22GB against ~22-23GB usable on
-#                           A10G is tight) vs. meaningfully faster + no costlier on the A10G setup. If it
-#                           OOMs: drop training.per_device_train_batch_size to 1 in the config (raise
+#                           On-demand (us-east-1, verified 2026-07): $5.672/hr = $1.418/GPU-hr. NOTE this is
+#                           MORE per-GPU than a single g5.2xlarge (~$1.212/hr, 1x A10G) -- bundling 4 GPUs
+#                           into one host costs a per-GPU premium for the extra CPU/RAM/network, it is not
+#                           itself a bulk discount. The actual case for this instance is total-cost-vs-time
+#                           against g6e.xlarge (1x L40S, ~$1.861/hr): LoRA's small gradient-sync volume
+#                           (~65M trainable params, not the full 12B frozen base) gives good multi-GPU
+#                           scaling efficiency, so 4x A10G finishes in ~6-10hrs (~$34-$57 total) vs 1x L40S's
+#                           ~20-30hrs (~$40-$55 total) -- roughly the same total training cost, ~3.2-3.6x
+#                           faster wall-clock. Real tradeoff versus the L40S option: more VRAM headroom on
+#                           the L40S (estimated peak ~15-22GB against ~22-23GB usable on A10G is tight) vs.
+#                           meaningfully faster at no extra total cost on the A10G setup. If it OOMs: drop
+#                           training.per_device_train_batch_size to 1 in the config (raise
 #                           gradient_accumulation_steps to compensate) or drop training.max_length.
 #   AWS_AMI_ID              default: looked up via SSM (latest AWS Deep Learning AMI, PyTorch, Ubuntu 22.04)
 #   AWS_REGION              default: aws configure's current region
