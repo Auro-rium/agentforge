@@ -37,6 +37,30 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _model_init_kwargs(cfg: AgentForgeConfig) -> dict:
+    kwargs: dict = {
+        "dtype": "bfloat16",
+        "attn_implementation": cfg.model.attn_implementation,
+        "trust_remote_code": cfg.model.trust_remote_code,
+    }
+    if torch.cuda.is_available():
+        # Multi-GPU QLoRA footgun: under `accelerate launch` (one process per
+        # GPU, DDP), a quantized model loaded with no device_map gets placed
+        # the same way in every process instead of each process owning its
+        # own GPU -- causing a crash or silent single-GPU-only training
+        # rather than real data-parallel scaling across all of them. Explicit
+        # per-process placement (the standard bitsandbytes+accelerate DDP
+        # fix) makes both the single-GPU and multi-GPU cases correct:
+        # PartialState().process_index is 0 (and harmless) for a single
+        # process, and each rank's own index under `accelerate launch`.
+        # Skipped when CUDA isn't available (the CPU smoke test) since
+        # cuda:0 wouldn't exist there.
+        from accelerate import PartialState
+
+        kwargs["device_map"] = {"": PartialState().process_index}
+    return kwargs
+
+
 def build_sft_config(cfg: AgentForgeConfig) -> SFTConfig:
     t = cfg.training
     return SFTConfig(
@@ -60,11 +84,7 @@ def build_sft_config(cfg: AgentForgeConfig) -> SFTConfig:
         eval_steps=t.eval_steps,
         report_to=t.report_to,
         seed=cfg.seed,
-        model_init_kwargs={
-            "dtype": "bfloat16",
-            "attn_implementation": cfg.model.attn_implementation,
-            "trust_remote_code": cfg.model.trust_remote_code,
-        },
+        model_init_kwargs=_model_init_kwargs(cfg),
     )
 
 
