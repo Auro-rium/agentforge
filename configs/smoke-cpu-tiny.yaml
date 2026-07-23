@@ -2,7 +2,13 @@ run_name: smoke-cpu-tiny
 seed: 42
 
 model:
-  base_model: hf-internal-testing/tiny-random-gpt2   # tiny public HF causal-LM, CPU-friendly
+  # NOT hf-internal-testing/tiny-random-gpt2: it has no chat_template at all
+  # (apply_chat_template raises before ever reaching tools-rendering logic)
+  # and GPT-2's module names (c_attn/c_proj/c_fc) don't match the
+  # q_proj/k_proj/... LoRA target_modules below anyway. Qwen2.5-0.5B-Instruct
+  # is small enough for a CPU smoke run, has a real tool-aware chat template,
+  # and uses Llama-style module naming that matches target_modules as-is.
+  base_model: Qwen/Qwen2.5-0.5B-Instruct
   trust_remote_code: false
   chat_template_path: null               # only set if swapped-in model lacks a tool-aware template
   attn_implementation: sdpa
@@ -40,8 +46,8 @@ training:
   max_length: 128
   packing: false
   assistant_only_loss: true
-  gradient_checkpointing: true
-  bf16: true
+  gradient_checkpointing: false           # CPU: no real benefit, and avoids some CPU-backend edge cases
+  bf16: false                             # bf16 mixed precision is a CUDA/XPU path; CPU smoke run stays fp32
   logging_steps: 10
   save_strategy: steps
   save_steps: 200
