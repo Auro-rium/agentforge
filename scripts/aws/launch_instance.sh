@@ -17,7 +17,13 @@
 #                           needs both dataset-read and repo-write scopes on that account
 #
 # Optional:
-#   AWS_INSTANCE_TYPE      default g5.2xlarge (1x A10G, 24GB -- fits gemma-4-12B-it QLoRA)
+#   AWS_INSTANCE_TYPE      default g6e.xlarge (1x L40S, 48GiB / ~44.7GiB usable VRAM). Chosen over the
+#                           cheaper g5.2xlarge (1x A10G, ~22-23GiB usable) deliberately: estimated peak
+#                           QLoRA VRAM for gemma-4-12B-it at max_length=4096/batch=2 is ~15-22GB, which
+#                           is a tight fit on the A10G and a comfortable one on the L40S. On-demand
+#                           pricing (us-east-1, verified 2026-07): g6e.xlarge ~$1.861/hr vs g5.2xlarge
+#                           ~$1.21/hr -- the L40S costs more per hour but removes OOM risk on a run that
+#                           already takes real wall-clock time, which is worth more than the hourly delta.
 #   AWS_AMI_ID              default: looked up via SSM (latest AWS Deep Learning AMI, PyTorch, Ubuntu 22.04)
 #   AWS_REGION              default: aws configure's current region
 #   AGENTFORGE_GIT_REF       default: main
@@ -33,7 +39,7 @@ set -euo pipefail
 : "${AGENTFORGE_GIT_REMOTE:?Set AGENTFORGE_GIT_REMOTE to this repos git URL}"
 : "${HF_TOKEN:?Set HF_TOKEN (required for the gated Salesforce/xlam-function-calling-60k dataset)}"
 
-AWS_INSTANCE_TYPE="${AWS_INSTANCE_TYPE:-g5.2xlarge}"
+AWS_INSTANCE_TYPE="${AWS_INSTANCE_TYPE:-g6e.xlarge}"
 AGENTFORGE_GIT_REF="${AGENTFORGE_GIT_REF:-main}"
 AGENTFORGE_TRAIN_CONFIG="${AGENTFORGE_TRAIN_CONFIG:-configs/gemma4-12b-qlora.yaml}"
 
@@ -66,17 +72,47 @@ trap 'rm -f "${USER_DATA_FILE}"' EXIT
   cat "${BOOTSTRAP_SCRIPT_DIR}/bootstrap_and_train.sh"
 } > "${USER_DATA_FILE}"
 
-echo "Launching ${AWS_INSTANCE_TYPE}..."
-INSTANCE_ID="$(aws ec2 run-instances \
-  --image-id "${AWS_AMI_ID}" \
-  --instance-type "${AWS_INSTANCE_TYPE}" \
-  --key-name "${AWS_KEY_NAME}" \
-  --security-group-ids "${AWS_SECURITY_GROUP_ID}" \
-  --iam-instance-profile "Name=${AWS_IAM_INSTANCE_PROFILE}" \
-  --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=200,VolumeType=gp3}' \
-  --user-data "file://${USER_DATA_FILE}" \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=agentforge-train}]' \
-  --query 'Instances[0].InstanceId' --output text)"
+# Tries a one-time spot request first (meaningfully cheaper -- see the pricing note below); if
+# EC2 can't fulfill it (capacity, price, or AZ constraints -- run-instances fails synchronously
+# for a one-time request, no polling needed) falls back to on-demand automatically.
+#
+# REAL CAVEAT, not yet mitigated: a spot interruption terminates the instance outright (this is a
+# one-time request, not persistent), and the current bootstrap_and_train.sh only syncs artifacts
+# to S3 at the very end of the whole pipeline, not incrementally during training -- so as things
+# stand today, an interruption mid-training loses the whole in-progress run, not just the time
+# since the last local checkpoint. Fine for a first/cheap experimental run; if you want real
+# interruption resilience (incremental S3 sync of checkpoints + train.py resuming via
+# trainer.train(resume_from_checkpoint=...) on relaunch), that's a real follow-up, not implemented
+# yet -- ask if you want it built before relying on spot for a long/expensive run.
+COMMON_RUN_ARGS=(
+  --image-id "${AWS_AMI_ID}"
+  --instance-type "${AWS_INSTANCE_TYPE}"
+  --key-name "${AWS_KEY_NAME}"
+  --security-group-ids "${AWS_SECURITY_GROUP_ID}"
+  --iam-instance-profile "Name=${AWS_IAM_INSTANCE_PROFILE}"
+  --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=200,VolumeType=gp3}'
+  --user-data "file://${USER_DATA_FILE}"
+)
+
+LAUNCH_MODE="spot"
+echo "Launching ${AWS_INSTANCE_TYPE} as a spot instance..."
+if INSTANCE_ID="$(aws ec2 run-instances \
+  "${COMMON_RUN_ARGS[@]}" \
+  --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time"}}' \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=agentforge-train},{Key=agentforge-launch-mode,Value=spot}]' \
+  --query 'Instances[0].InstanceId' --output text 2>/tmp/spot_launch_err.txt)"; then
+  echo "Spot request fulfilled: ${INSTANCE_ID}"
+else
+  echo "Spot launch failed (capacity/price/AZ constraint), falling back to on-demand:"
+  cat /tmp/spot_launch_err.txt >&2
+  LAUNCH_MODE="on-demand"
+  INSTANCE_ID="$(aws ec2 run-instances \
+    "${COMMON_RUN_ARGS[@]}" \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=agentforge-train},{Key=agentforge-launch-mode,Value=on-demand}]' \
+    --query 'Instances[0].InstanceId' --output text)"
+  echo "On-demand instance launched: ${INSTANCE_ID}"
+fi
+rm -f /tmp/spot_launch_err.txt
 
 echo "Instance ${INSTANCE_ID} launching. Waiting for it to enter 'running' state..."
 aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}"
@@ -91,8 +127,18 @@ Instance ${INSTANCE_ID} is running at ${PUBLIC_IP}.
 Data fetch + build + training start automatically via user-data. Progress log:
   ssh -i <your-key>.pem ubuntu@${PUBLIC_IP} 'tail -f /var/log/agentforge-bootstrap.log'
 
-Artifacts (checkpoints, manifest_stats.json, reports/) sync to:
-  ${AGENTFORGE_S3_BUCKET}
+Launch mode: ${LAUNCH_MODE}
+Artifacts (checkpoints, manifest_stats.json, reports/) sync to ${AGENTFORGE_S3_BUCKET} -- but
+only once, at the very end of the whole pipeline, not incrementally during training (see the
+spot-interruption caveat above).
+
+Cost: ${AWS_INSTANCE_TYPE} runs ~\$1.861/hr on-demand or ~\$1.38/hr typical spot (us-east-1,
+verified 2026-07 -- check your region/current pricing, both drift, and spot varies by AZ).
+Training-time estimate (rough -- real manifest size isn't known until the data pull actually
+runs, see technical.md): ~20-30 hours of training compute, i.e. roughly \$28-\$41 on spot or
+\$40-\$55 on-demand for training alone, plus a small amount more for setup/eval/publish. Check
+manifest_stats.json for the real row/token counts once the data pull finishes -- that turns this
+range into a real number.
 
 Remember to terminate the instance when done -- this script does not do that for you:
   aws ec2 terminate-instances --instance-ids ${INSTANCE_ID}
