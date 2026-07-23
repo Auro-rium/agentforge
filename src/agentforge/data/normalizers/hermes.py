@@ -272,7 +272,9 @@ class HermesNormalizer(Normalizer):
                     tool_calls.append(
                         ToolCall(
                             id=call_id,
-                            function=FunctionCall(name=name, arguments=_function_call_arguments(payload)),
+                            function=FunctionCall(
+                                name=name, arguments=_function_call_arguments(payload)
+                            ),
                         )
                     )
                 prose = _TOOL_CALL_TAG_RE.sub("", value).strip() or None

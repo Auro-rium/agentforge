@@ -219,8 +219,9 @@ class TestXlamStatsAccounting:
 
 class TestXlamGatedDatasetErrorWrapping:
     def test_real_gated_repo_error_is_wrapped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from huggingface_hub.errors import GatedRepoError
         from unittest.mock import Mock
+
+        from huggingface_hub.errors import GatedRepoError
 
         fake_response = Mock()
         fake_response.status_code = 403

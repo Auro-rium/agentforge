@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections import Counter
 from pathlib import Path
 
 from agentforge.config import AgentForgeConfig
@@ -45,7 +44,9 @@ def _row_dedup_key(row: Row) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _dedupe_across_sources(rows_by_source: dict[str, list[Row]]) -> tuple[dict[str, list[Row]], int]:
+def _dedupe_across_sources(
+    rows_by_source: dict[str, list[Row]],
+) -> tuple[dict[str, list[Row]], int]:
     """Remove exact-duplicate rows (by message content) across all sources,
     keeping the first occurrence. Returns (deduped_rows_by_source, removed_count).
     """
@@ -99,7 +100,9 @@ def _row_stats(rows: list[Row]) -> dict:
     }
 
 
-def run_normalizers(cfg: AgentForgeConfig) -> tuple[dict[str, list[Row]], dict[str, NormalizationStats]]:
+def run_normalizers(
+    cfg: AgentForgeConfig,
+) -> tuple[dict[str, list[Row]], dict[str, NormalizationStats]]:
     """Network-touching step: instantiate each configured source's real
     Normalizer (no injected raw_examples -> hits the live HF dataset) and run
     it. Kept separate from `_process_rows` so the rest of the pipeline is
@@ -117,8 +120,9 @@ def run_normalizers(cfg: AgentForgeConfig) -> tuple[dict[str, list[Row]], dict[s
             )
         normalizer = NORMALIZER_CLASSES[source]()
         rows, stats = normalizer.run()
-        if cfg.data.max_examples_per_source is not None and len(rows) > cfg.data.max_examples_per_source:
-            rows = rows[: cfg.data.max_examples_per_source]
+        max_n = cfg.data.max_examples_per_source
+        if max_n is not None and len(rows) > max_n:
+            rows = rows[:max_n]
         normalization_stats[source] = stats
         raw_rows_by_source[source] = rows
         _write_jsonl(rows, normalized_dir / f"{source}.jsonl")

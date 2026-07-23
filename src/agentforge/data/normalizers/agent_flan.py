@@ -124,7 +124,9 @@ class AgentFlanNormalizer(Normalizer):
             elif role == "assistant":
                 parsed = parse_react_turn(content)
                 if parsed is not None:
-                    arguments, args_raw = react_action_input_to_arguments_json(parsed.action_input_raw)
+                    arguments, args_raw = react_action_input_to_arguments_json(
+                        parsed.action_input_raw
+                    )
                     call_id = f"call_{call_counter}"
                     call_counter += 1
                     open_calls[call_id] = parsed.action
@@ -161,7 +163,11 @@ class AgentFlanNormalizer(Normalizer):
             return None
 
         raw_id = raw.get("id", "")
-        row_id = f"agent_flan_{split}__{raw_id}" if raw_id else f"agent_flan_{split}__{hash(str(conversation)) & 0xFFFFFFFF}"
+        if raw_id:
+            row_id = f"agent_flan_{split}__{raw_id}"
+        else:
+            fallback_hash = hash(str(conversation)) & 0xFFFFFFFF
+            row_id = f"agent_flan_{split}__{fallback_hash}"
 
         return Row(
             id=row_id,

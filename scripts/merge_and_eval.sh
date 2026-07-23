@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Merges a trained LoRA adapter into a full-precision base model, then runs the
-# fast offline dev-loop scorer against the held-out set. Run on the training
-# instance (or any box with the base model + adapter available).
+# Produces a standalone merged model (for serving stacks without LoRA
+# support) AND separately confirms quality via the adapter-mode dev-loop
+# scorer -- two independent conveniences bundled for the common
+# "prepare for serving + sanity check" workflow. Note the eval step
+# evaluates the *adapter* (base + LoRA), not the merged output -- that's
+# deliberate (adapter-mode needs no merge at all, see scripts/dev_eval.sh),
+# not a bug; the merge is purely for producing a standalone artifact here.
 # Usage: scripts/merge_and_eval.sh <adapter_dir> [merged_output_dir]
 
 set -euo pipefail

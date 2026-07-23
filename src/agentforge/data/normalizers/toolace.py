@@ -74,7 +74,10 @@ def _parse_structured_tool_calls(value: str) -> list[dict] | None:
         return None
     if not isinstance(parsed, list) or not parsed:
         return None
-    if not all(isinstance(item, dict) and "name" in item and "arguments" in item for item in parsed):
+    is_tool_call_shaped = all(
+        isinstance(item, dict) and "name" in item and "arguments" in item for item in parsed
+    )
+    if not is_tool_call_shaped:
         return None
     return parsed
 
@@ -157,7 +160,9 @@ class ToolACENormalizer(Normalizer):
                     call_id = f"call_{call_counter}"
                     call_counter += 1
                     open_calls[call_id] = name
-                    tool_calls.append(ToolCall(id=call_id, function=FunctionCall(name=name, arguments=arguments)))
+                    tool_calls.append(
+                        ToolCall(id=call_id, function=FunctionCall(name=name, arguments=arguments))
+                    )
 
                 if not tool_calls:
                     # Every item in the list was malformed (missing name) --
@@ -172,7 +177,9 @@ class ToolACENormalizer(Normalizer):
                         call_id, name = next(reversed(open_calls.items()))
                     else:
                         call_id, name = f"call_{call_counter}", "unknown"
-                    messages.append(Message(role="tool", content=value, tool_call_id=call_id, name=name))
+                    messages.append(
+                        Message(role="tool", content=value, tool_call_id=call_id, name=name)
+                    )
                 else:
                     messages.append(Message(role="user", content=value))
             # Any other `from` value (e.g. a leaked "system" entry) is
@@ -183,8 +190,9 @@ class ToolACENormalizer(Normalizer):
         if not messages or messages[0].role not in ("system", "user"):
             return None
 
+        conv_hash = hash(json.dumps(conversations, sort_keys=True, default=str)) & 0xFFFFFFFF
         return Row(
-            id=_row_id(hash(json.dumps(conversations, sort_keys=True, default=str)) & 0xFFFFFFFF, conversations),
+            id=_row_id(conv_hash, conversations),
             source=self.source,
             messages=messages,
             tools=tools,

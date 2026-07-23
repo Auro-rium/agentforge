@@ -1,4 +1,4 @@
-"""Parsing helpers shared across normalizers.
+"""Parsing helpers shared across normalizers (and eval/tool_call_parsers.py).
 
 `extract_json_objects` and the ReAct regex are used by more than one
 normalizer (glaive/toolace share the brace-matching extractor; toolace/
@@ -35,6 +35,45 @@ REACT_TURN_RE = re.compile(
 OBSERVATION_PREFIX_RE = re.compile(r"^\s*Observation:\s*", re.IGNORECASE)
 
 
+def find_balanced_brace_span(text: str, start: int) -> str | None:
+    """From `text[start]` (expected to be '{'), return the balanced `{...}`
+    span, tracking only `"`-delimited strings (JSON semantics) so an inner
+    `'`-wrapped JSON blob -- e.g. glaive's real, documented quirk of
+    embedding `"arguments": '{"city": "Paris"}'` -- doesn't prematurely
+    close the span at its first inner `}`. Returns None if `text[start]`
+    isn't `{` or no balancing `}` is found.
+
+    Unlike `extract_json_objects` below (which scans an entire string for
+    *all* top-level objects anywhere in it), this anchors to one specific
+    starting position -- the right tool when you need "the object starting
+    exactly here," not "any object somewhere in this text."
+    """
+    if start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def extract_json_objects(text: str) -> list[dict]:
     """Extract top-level JSON objects embedded in `text` via brace matching.
 
@@ -66,7 +105,7 @@ def extract_json_objects(text: str) -> list[dict]:
             if depth == 0:
                 start = i
             depth += 1
-        elif ch == "}":
+        elif ch == "}":  # noqa: SIM102 -- depth -= 1 must run before the depth==0 check, can't merge
             if depth > 0:
                 depth -= 1
                 if depth == 0 and start is not None:

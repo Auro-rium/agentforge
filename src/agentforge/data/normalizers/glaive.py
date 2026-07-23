@@ -17,45 +17,12 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from agentforge.data.normalizers.base import Normalizer
-from agentforge.data.react_parsing import extract_json_objects
+from agentforge.data.react_parsing import extract_json_objects, find_balanced_brace_span
 from agentforge.data.schema import FunctionCall, Message, Row, ToolCall, ToolSpec
 
 _TURN_SPLIT_RE = re.compile(r"\n(USER|ASSISTANT|FUNCTION RESPONSE):\s*")
 _FUNCTIONCALL_MARKER_RE = re.compile(r"<functioncall>\s*")
 _SINGLE_QUOTED_JSON_RE = re.compile(r"'(\{.*\})'", re.DOTALL)
-
-
-def _find_balanced_brace_span(text: str, start: int) -> str | None:
-    """From `text[start]` (expected to be '{'), return the balanced `{...}`
-    span, tracking only `"`-delimited strings (JSON semantics) so an inner
-    `'`-wrapped JSON blob -- glaive's real, documented quirk of embedding
-    `"arguments": '{"city": "Paris"}'` -- doesn't prematurely close the span
-    at its first inner `}`.
-    """
-    if start >= len(text) or text[start] != "{":
-        return None
-    depth = 0
-    in_string = False
-    escape = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
 
 
 def _parse_functioncall_payload(candidate: str) -> dict | None:
@@ -150,7 +117,7 @@ class GlaiveNormalizer(Normalizer):
                         messages.append(Message(role="assistant", content=text))
                     continue
                 brace_start = marker_match.end()
-                candidate = _find_balanced_brace_span(text, brace_start)
+                candidate = find_balanced_brace_span(text, brace_start)
                 if candidate is None:
                     return None
                 payload = _parse_functioncall_payload(candidate)
@@ -174,7 +141,9 @@ class GlaiveNormalizer(Normalizer):
                         role="assistant",
                         content=remaining_prose,
                         tool_calls=[
-                            ToolCall(id=call_id, function=FunctionCall(name=name, arguments=arguments))
+                            ToolCall(
+                                id=call_id, function=FunctionCall(name=name, arguments=arguments)
+                            )
                         ],
                     )
                 )

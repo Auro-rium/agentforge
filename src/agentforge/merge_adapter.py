@@ -21,7 +21,9 @@ from transformers import AutoModelForCausalLM
 from agentforge.model_utils import load_tokenizer
 
 
-def merge_adapter(*, base_model: str, adapter_dir: str, output_dir: str, trust_remote_code: bool = False) -> None:
+def merge_adapter(
+    *, base_model: str, adapter_dir: str, output_dir: str, trust_remote_code: bool = False
+) -> None:
     base = AutoModelForCausalLM.from_pretrained(
         base_model, dtype=torch.bfloat16, trust_remote_code=trust_remote_code
     )
@@ -39,7 +41,9 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     args = parser.parse_args()
 
-    merge_adapter(base_model=args.base_model, adapter_dir=args.adapter_dir, output_dir=args.output_dir)
+    merge_adapter(
+        base_model=args.base_model, adapter_dir=args.adapter_dir, output_dir=args.output_dir
+    )
     print(f"Merged model written to {args.output_dir}")
 
 

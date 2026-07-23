@@ -44,7 +44,7 @@ class Message(BaseModel):
     name: str | None = None
 
     @model_validator(mode="after")
-    def _role_field_constraints(self) -> "Message":
+    def _role_field_constraints(self) -> Message:
         if self.tool_calls is not None and self.role != "assistant":
             raise ValueError("tool_calls is only valid on role='assistant'")
         if self.role == "tool" and self.tool_call_id is None:
@@ -74,7 +74,7 @@ class Row(BaseModel):
     meta: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_row_shape(self) -> "Row":
+    def _validate_row_shape(self) -> Row:
         if not self.messages:
             raise ValueError("row must contain at least one message")
         if self.messages[0].role not in ("system", "user"):
@@ -84,10 +84,9 @@ class Row(BaseModel):
         for msg in self.messages:
             if msg.role == "assistant" and msg.tool_calls:
                 open_call_ids.update(tc.id for tc in msg.tool_calls)
-            elif msg.role == "tool":
-                if msg.tool_call_id not in open_call_ids:
-                    # Soft check: some source datasets have imperfect tool_call_id
-                    # linkage. Never drop the row for this alone — just tag it so
-                    # manifest_stats.json can report how common it is.
-                    self.meta = {**self.meta, "orphan_tool_response": True}
+            elif msg.role == "tool" and msg.tool_call_id not in open_call_ids:
+                # Soft check: some source datasets have imperfect tool_call_id
+                # linkage. Never drop the row for this alone — just tag it so
+                # manifest_stats.json can report how common it is.
+                self.meta = {**self.meta, "orphan_tool_response": True}
         return self

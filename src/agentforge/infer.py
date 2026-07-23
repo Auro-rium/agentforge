@@ -67,7 +67,10 @@ def generate_completion(
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.inference_mode():
         output_ids = model.generate(
-            **inputs, max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=tokenizer.eos_token_id
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
         )
     new_tokens = output_ids[0][inputs["input_ids"].shape[1] :]
     return tokenizer.decode(new_tokens, skip_special_tokens=True)
@@ -77,14 +80,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", default="google/gemma-4-12B-it")
     parser.add_argument("--adapter-dir", required=True)
-    parser.add_argument("--quantized", action="store_true", help="Load base model in 4-bit (QLoRA-trained adapters)")
+    parser.add_argument(
+        "--quantized", action="store_true", help="Load base model in 4-bit (QLoRA-trained adapters)"
+    )
     parser.add_argument("--messages", required=True, help="JSON list of {role, content} messages")
     parser.add_argument("--tools", default=None, help="JSON list of tool schemas")
     args = parser.parse_args()
 
     tokenizer = load_tokenizer(base_model=args.base_model)
     model = load_adapter_model(
-        base_model=args.base_model, adapter_dir=args.adapter_dir, quantization_enabled=args.quantized
+        base_model=args.base_model,
+        adapter_dir=args.adapter_dir,
+        quantization_enabled=args.quantized,
     )
     messages = json.loads(args.messages)
     tools = json.loads(args.tools) if args.tools else None

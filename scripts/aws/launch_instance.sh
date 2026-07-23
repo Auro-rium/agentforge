@@ -12,7 +12,9 @@
 #   AWS_IAM_INSTANCE_PROFILE  instance profile name/ARN with S3 write access to AGENTFORGE_S3_BUCKET
 #   AGENTFORGE_S3_BUCKET   s3://bucket/prefix that checkpoints/reports/manifest_stats.json sync to
 #   AGENTFORGE_GIT_REMOTE  git URL the instance clones (e.g. https://github.com/Auro-rium/agentforge.git)
-#   HF_TOKEN               needed on-instance for the gated Salesforce/xlam-function-calling-60k dataset
+#   HF_TOKEN               dual-purpose: gated Salesforce/xlam-function-calling-60k dataset download,
+#                           AND publishing the trained adapter to https://huggingface.co/auro-rirum --
+#                           needs both dataset-read and repo-write scopes on that account
 #
 # Optional:
 #   AWS_INSTANCE_TYPE      default g5.2xlarge (1x A10G, 24GB -- fits gemma-4-12B-it QLoRA)
@@ -20,6 +22,7 @@
 #   AWS_REGION              default: aws configure's current region
 #   AGENTFORGE_GIT_REF       default: main
 #   AGENTFORGE_TRAIN_CONFIG  default: configs/gemma4-12b-qlora.yaml
+#   AGENTFORGE_HF_REPO_NAME  default: gemma4-12b-agentforge (published to auro-rirum/<this>)
 
 set -euo pipefail
 
@@ -27,7 +30,7 @@ set -euo pipefail
 : "${AWS_SECURITY_GROUP_ID:?Set AWS_SECURITY_GROUP_ID to a security group id}"
 : "${AWS_IAM_INSTANCE_PROFILE:?Set AWS_IAM_INSTANCE_PROFILE (needs s3:PutObject on AGENTFORGE_S3_BUCKET)}"
 : "${AGENTFORGE_S3_BUCKET:?Set AGENTFORGE_S3_BUCKET, e.g. s3://my-bucket/agentforge}"
-: "${AGENTFORGE_GIT_REMOTE:?Set AGENTFORGE_GIT_REMOTE to this repo's git URL}"
+: "${AGENTFORGE_GIT_REMOTE:?Set AGENTFORGE_GIT_REMOTE to this repos git URL}"
 : "${HF_TOKEN:?Set HF_TOKEN (required for the gated Salesforce/xlam-function-calling-60k dataset)}"
 
 AWS_INSTANCE_TYPE="${AWS_INSTANCE_TYPE:-g5.2xlarge}"
@@ -58,6 +61,7 @@ trap 'rm -f "${USER_DATA_FILE}"' EXIT
   echo "export AGENTFORGE_GIT_REMOTE='${AGENTFORGE_GIT_REMOTE}'"
   echo "export AGENTFORGE_GIT_REF='${AGENTFORGE_GIT_REF}'"
   echo "export AGENTFORGE_TRAIN_CONFIG='${AGENTFORGE_TRAIN_CONFIG}'"
+  echo "export AGENTFORGE_HF_REPO_NAME='${AGENTFORGE_HF_REPO_NAME:-gemma4-12b-agentforge}'"
   echo "export HF_TOKEN='${HF_TOKEN}'"
   cat "${BOOTSTRAP_SCRIPT_DIR}/bootstrap_and_train.sh"
 } > "${USER_DATA_FILE}"
