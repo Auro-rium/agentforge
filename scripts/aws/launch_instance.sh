@@ -17,13 +17,19 @@
 #                           needs both dataset-read and repo-write scopes on that account
 #
 # Optional:
-#   AWS_INSTANCE_TYPE      default g6e.xlarge (1x L40S, 48GiB / ~44.7GiB usable VRAM). Chosen over the
-#                           cheaper g5.2xlarge (1x A10G, ~22-23GiB usable) deliberately: estimated peak
-#                           QLoRA VRAM for gemma-4-12B-it at max_length=4096/batch=2 is ~15-22GB, which
-#                           is a tight fit on the A10G and a comfortable one on the L40S. On-demand
-#                           pricing (us-east-1, verified 2026-07): g6e.xlarge ~$1.861/hr vs g5.2xlarge
-#                           ~$1.21/hr -- the L40S costs more per hour but removes OOM risk on a run that
-#                           already takes real wall-clock time, which is worth more than the hourly delta.
+#   AWS_INSTANCE_TYPE      default g5.12xlarge (4x A10G, 24GiB/~22-23GiB usable VRAM EACH -- data-parallel
+#                           DDP training, so every GPU independently holds the full quantized model + LoRA
+#                           adapters + its own batch's activations, same per-GPU footprint as a single A10G).
+#                           On-demand (us-east-1, verified 2026-07): $5.672/hr = $1.418/GPU-hr -- cheaper
+#                           per-GPU than every single-GPU option considered (g5.2xlarge ~$1.21/hr,
+#                           g6e.xlarge/1x L40S ~$1.861/hr), AND LoRA's small gradient-sync volume (~65M
+#                           trainable params, not the full 12B) gives good multi-GPU scaling efficiency --
+#                           net effect: roughly the same total training COST as staying single-GPU, but
+#                           ~3.2-3.6x faster wall-clock. Real tradeoff versus g6e.xlarge (1x L40S): more
+#                           VRAM headroom on the L40S (estimated peak ~15-22GB against ~22-23GB usable on
+#                           A10G is tight) vs. meaningfully faster + no costlier on the A10G setup. If it
+#                           OOMs: drop training.per_device_train_batch_size to 1 in the config (raise
+#                           gradient_accumulation_steps to compensate) or drop training.max_length.
 #   AWS_AMI_ID              default: looked up via SSM (latest AWS Deep Learning AMI, PyTorch, Ubuntu 22.04)
 #   AWS_REGION              default: aws configure's current region
 #   AGENTFORGE_GIT_REF       default: main
@@ -39,7 +45,7 @@ set -euo pipefail
 : "${AGENTFORGE_GIT_REMOTE:?Set AGENTFORGE_GIT_REMOTE to this repos git URL}"
 : "${HF_TOKEN:?Set HF_TOKEN (required for the gated Salesforce/xlam-function-calling-60k dataset)}"
 
-AWS_INSTANCE_TYPE="${AWS_INSTANCE_TYPE:-g6e.xlarge}"
+AWS_INSTANCE_TYPE="${AWS_INSTANCE_TYPE:-g5.12xlarge}"
 AGENTFORGE_GIT_REF="${AGENTFORGE_GIT_REF:-main}"
 AGENTFORGE_TRAIN_CONFIG="${AGENTFORGE_TRAIN_CONFIG:-configs/gemma4-12b-qlora.yaml}"
 
@@ -132,13 +138,16 @@ Artifacts (checkpoints, manifest_stats.json, reports/) sync to ${AGENTFORGE_S3_B
 only once, at the very end of the whole pipeline, not incrementally during training (see the
 spot-interruption caveat above).
 
-Cost: ${AWS_INSTANCE_TYPE} runs ~\$1.861/hr on-demand or ~\$1.38/hr typical spot (us-east-1,
-verified 2026-07 -- check your region/current pricing, both drift, and spot varies by AZ).
+Cost: ${AWS_INSTANCE_TYPE} runs ~\$5.672/hr on-demand (us-east-1, verified 2026-07 -- check your
+region/current pricing, this drifts). No verified spot figure for this instance type -- if this
+launched on spot, check the actual settled price in Billing, don't trust a guessed number here.
 Training-time estimate (rough -- real manifest size isn't known until the data pull actually
-runs, see technical.md): ~20-30 hours of training compute, i.e. roughly \$28-\$41 on spot or
-\$40-\$55 on-demand for training alone, plus a small amount more for setup/eval/publish. Check
-manifest_stats.json for the real row/token counts once the data pull finishes -- that turns this
-range into a real number.
+runs, see technical.md): single-GPU compute would be ~20-30 hours; with 4x A10G data-parallel
+DDP and LoRA's small gradient-sync volume giving good scaling efficiency, expect roughly
+~6-10 hours wall-clock, i.e. roughly \$34-\$57 for training alone at the on-demand rate, plus a
+small amount more for setup/eval/publish. Check manifest_stats.json for the real row/token
+counts once the data pull finishes -- that turns this range into a real number, and the
+trainer's own steps/sec logging a few minutes into a real run gives a live, accurate ETA.
 
 Remember to terminate the instance when done -- this script does not do that for you:
   aws ec2 terminate-instances --instance-ids ${INSTANCE_ID}

@@ -31,8 +31,8 @@ else
 fi
 
 if [[ "${GPU_COUNT}" -gt 1 ]]; then
-  echo "Detected ${GPU_COUNT} GPUs, launching via accelerate."
-  "${PYTHON}" -m accelerate.commands.launch -m agentforge.train --config "${CONFIG}"
+  echo "Detected ${GPU_COUNT} GPUs, launching via accelerate (explicit --multi_gpu --num_processes, not relying on auto-detection)."
+  "${PYTHON}" -m accelerate.commands.launch --multi_gpu --num_processes="${GPU_COUNT}" -m agentforge.train --config "${CONFIG}"
 elif [[ "${GPU_COUNT}" -eq 1 ]]; then
   echo "Detected 1 GPU."
   "${PYTHON}" -m agentforge.train --config "${CONFIG}"
